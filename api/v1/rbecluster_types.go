@@ -107,6 +107,26 @@ type RbeWorkerSpec struct {
 	// +kubebuilder:default="docker://ghcr.io/catthehacker/ubuntu:act-22.04"
 	// +optional
 	ContainerImage string `json:"containerImage,omitempty"`
+
+	// CPURequest is the per-worker-pod CPU request (buildbarn chart worker.resources.requests.cpu).
+	// +kubebuilder:default="2"
+	// +optional
+	CPURequest string `json:"cpuRequest,omitempty"`
+	// MemoryRequest is the per-worker-pod memory request. Heavy Rust links
+	// (aws-lc-sys/ring) peak >7Gi; combined with Concurrency=1 this reserves
+	// enough headroom to keep a single action from OOM-killing the node.
+	// +kubebuilder:default="4Gi"
+	// +optional
+	MemoryRequest string `json:"memoryRequest,omitempty"`
+	// MemoryLimit caps per-worker-pod memory. Empty = no limit (the chart default).
+	// Set it (e.g. "14Gi" on a 16Gi node at Concurrency=1) to make heavy links
+	// deterministic rather than oversubscribing the node.
+	// +optional
+	MemoryLimit string `json:"memoryLimit,omitempty"`
+	// NodeSelector steers worker pods onto a labeled node pool (e.g. a
+	// memory-optimized r6i group: {"workload":"rbe-worker"}). Empty = default scheduling.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 }
 
 // RbeStorageSpec configures the sharded CAS/AC blobstore (EBS-backed).
