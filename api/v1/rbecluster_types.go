@@ -107,6 +107,68 @@ type RbeWorkerSpec struct {
 	// +kubebuilder:default="docker://ghcr.io/catthehacker/ubuntu:act-22.04"
 	// +optional
 	ContainerImage string `json:"containerImage,omitempty"`
+
+	// CPURequest is the per-worker-pod CPU request (buildbarn chart worker.resources.requests.cpu).
+	// +kubebuilder:default="2"
+	// +optional
+	CPURequest string `json:"cpuRequest,omitempty"`
+	// MemoryRequest is the per-worker-pod memory request. Heavy Rust links
+	// (aws-lc-sys/ring) peak >7Gi; combined with Concurrency=1 this reserves
+	// enough headroom to keep a single action from OOM-killing the node.
+	// +kubebuilder:default="4Gi"
+	// +optional
+	MemoryRequest string `json:"memoryRequest,omitempty"`
+	// MemoryLimit caps per-worker-pod memory. Empty = no limit (the chart default).
+	// Set it (e.g. "14Gi" on a 16Gi node at Concurrency=1) to make heavy links
+	// deterministic rather than oversubscribing the node.
+	// +optional
+	MemoryLimit string `json:"memoryLimit,omitempty"`
+	// NodeSelector steers worker pods onto a labeled node pool (e.g. a
+	// memory-optimized r6i group: {"workload":"rbe-worker"}). Empty = default scheduling.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Autoscaling, when enabled, has the operator manage a KEDA ScaledObject that
+	// scales the worker Deployment on the buildbarn scheduler's queue backlog, so RBE
+	// capacity tracks build demand (and scales down — even to zero — when idle). The
+	// static Replicas becomes just the helm floor (set to MinReplicas). Node capacity
+	// still caps the ceiling; a node autoscaler (Karpenter/CAS on the worker nodegroup)
+	// is the complementary half.
+	// +optional
+	Autoscaling WorkerAutoscaling `json:"autoscaling,omitempty"`
+}
+
+// WorkerAutoscaling configures KEDA-driven worker autoscaling on buildbarn queue
+// depth. The trigger is a Prometheus query for the backlog (tasks accepted but not
+// completed = queued + executing); the operator scales replicas ≈ ceil(backlog /
+// TargetBacklogPerReplica).
+type WorkerAutoscaling struct {
+	// Enabled turns on the managed KEDA ScaledObject for the worker Deployment.
+	Enabled bool `json:"enabled,omitempty"`
+	// MinReplicas is the worker floor. 0 = scale-to-zero when the queue is empty
+	// (cheapest, but the first build after idle waits for a cold worker start).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=1
+	// +optional
+	MinReplicas int32 `json:"minReplicas,omitempty"`
+	// MaxReplicas is the worker ceiling. Cannot exceed what the worker nodegroup can
+	// hold without node autoscaling.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=2
+	// +optional
+	MaxReplicas int32 `json:"maxReplicas,omitempty"`
+	// TargetBacklogPerReplica is the queued+executing tasks each worker should carry;
+	// replicas ≈ ceil(backlog / this). Empty ⇒ the worker Concurrency.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	TargetBacklogPerReplica int32 `json:"targetBacklogPerReplica,omitempty"`
+	// PrometheusAddress is the Prometheus the KEDA trigger queries.
+	// +kubebuilder:default="http://prometheus-server.monitoring.svc.cluster.local:80"
+	// +optional
+	PrometheusAddress string `json:"prometheusAddress,omitempty"`
+	// CooldownSeconds is how long to wait after the backlog drains before scaling down.
+	// +kubebuilder:default=300
+	// +optional
+	CooldownSeconds int32 `json:"cooldownSeconds,omitempty"`
 }
 
 // RbeStorageSpec configures the sharded CAS/AC blobstore (EBS-backed).
