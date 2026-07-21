@@ -13,8 +13,40 @@ for RBE topology + scaling.
 package v1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// RbeControlPlanePlacement pins a Buildbarn CONTROL-PLANE singleton (frontend,
+// scheduler, storage) to specific capacity and gives it real resource requests.
+//
+// Why this exists as its own type rather than more loose fields: the buildbarn chart
+// used to apply ONE global nodeSelector/tolerations to every pod, so the singletons
+// inevitably landed on the same tainted SPOT pool as the scale-out workers, as
+// BestEffort pods. bb-scheduler holds the entire RBE action queue in NON-DURABLE
+// process RAM, so losing that pod fails every concurrent build at once — and
+// BestEffort is precisely what the kubelet evicts FIRST when a node packed with
+// memory-hungry build actions comes under pressure. Splitting the control plane onto
+// stable on-demand capacity, with requests that make it Burstable rather than
+// BestEffort, is the fix. Requires buildbarn chart >= 0.2.0, which added the
+// per-component values these render into.
+//
+// All three fields are optional; unset means "inherit the chart-global placement and
+// emit no resources", i.e. exactly the pre-0.2.0 behavior.
+type RbeControlPlanePlacement struct {
+	// NodeSelector pins the component to a labeled node pool, e.g.
+	// {"workload":"rbe-control"} for a small dedicated on-demand pool.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations let the component land on a tainted pool. Pair with NodeSelector:
+	// the toleration grants access, the selector compels placement.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// Resources sets requests/limits on the component's main container. SET THIS —
+	// leaving it empty is what makes the pod BestEffort and first to be evicted.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
 
 // RbeFrontendSpec configures the gRPC frontend (the internet-facing entrypoint).
 type RbeFrontendSpec struct {
@@ -34,6 +66,9 @@ type RbeFrontendSpec struct {
 	// protects an internet-facing RBE endpoint.
 	// +optional
 	JWT RbeJWTSpec `json:"jwt,omitempty"`
+
+	// Placement + resources for this control-plane singleton.
+	RbeControlPlanePlacement `json:",inline"`
 }
 
 // RbeTLSSpec is the frontend gRPC-TLS config.
@@ -82,6 +117,9 @@ type RbeSchedulerSpec struct {
 	// +kubebuilder:default="7200s"
 	// +optional
 	MaximumExecutionTimeout string `json:"maximumExecutionTimeout,omitempty"`
+
+	// Placement + resources for this control-plane singleton.
+	RbeControlPlanePlacement `json:",inline"`
 }
 
 // RbeWorkerSpec configures the worker pool (where actions execute).
@@ -185,6 +223,9 @@ type RbeStorageSpec struct {
 	// +kubebuilder:default="1Gi"
 	// +optional
 	AcSize string `json:"acSize,omitempty"`
+
+	// Placement + resources for this control-plane singleton.
+	RbeControlPlanePlacement `json:",inline"`
 }
 
 // RbeProbeSpec configures the periodic RBE smoke build the operator runs to prove
