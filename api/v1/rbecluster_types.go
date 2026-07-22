@@ -142,7 +142,7 @@ type RbeWorkerSpec struct {
 	// ContainerImage is advertised to the scheduler for action routing + the RBE
 	// action-cache key. MUST equal docker://<runnerImage> AND the consumer's
 	// //platforms:rbe container-image exec-property, or actions never match.
-	// +kubebuilder:default="docker://ghcr.io/catthehacker/ubuntu:act-22.04"
+	// +kubebuilder:default="docker://042825952740.dkr.ecr.us-east-1.amazonaws.com/tbzl-rbe-worker:act-22.04-libtinfo5-py3"
 	// +optional
 	ContainerImage string `json:"containerImage,omitempty"`
 
