@@ -1,0 +1,758 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: rbeclusters.fastverk.savvifi.com
+spec:
+  group: fastverk.savvifi.com
+  names:
+    categories:
+    - fastverk
+    kind: RbeCluster
+    listKind: RbeClusterList
+    plural: rbeclusters
+    shortNames:
+    - rbe
+    singular: rbecluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.endpoint
+      name: Endpoint
+      type: string
+    - jsonPath: .status.workers.total
+      name: Workers
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: RbeCluster is the Schema for the rbeclusters API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RbeClusterSpec is the desired state of an RbeCluster.
+            properties:
+              chartRepo:
+                description: |-
+                  ChartRepo/ChartVersion pin the buildbarn Helm chart the delegated Helm-runner
+                  Job installs. Empty falls back to the operator env (RBE_CHART_REPO / _VERSION).
+                type: string
+              chartVersion:
+                type: string
+              frontend:
+                description: RbeFrontendSpec configures the gRPC frontend (the internet-facing
+                  entrypoint).
+                properties:
+                  jwt:
+                    description: |-
+                      JWT enables JWT authn on the frontend (Cognito M2M / client-credentials
+                      access tokens). Buildbarn's frontend has NO native authz, so this is what
+                      protects an internet-facing RBE endpoint.
+                    properties:
+                      enabled:
+                        type: boolean
+                      issuer:
+                        description: |-
+                          Issuer is the Cognito access-token issuer:
+                          https://cognito-idp.<region>.amazonaws.com/<userPoolId>.
+                        type: string
+                      jwksUrl:
+                        description: JwksURL is <issuer>/.well-known/jwks.json (the
+                          jwks-sync sidecar polls it).
+                        type: string
+                      requiredScope:
+                        default: fastverk-api/rbe:build
+                        description: RequiredScope is the resourceServer/scope the
+                          token must carry.
+                        type: string
+                    type: object
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      NodeSelector pins the component to a labeled node pool, e.g.
+                      {"workload":"rbe-control"} for a small dedicated on-demand pool.
+                    type: object
+                  replicas:
+                    default: 3
+                    description: Replicas is the frontend Deployment replica count.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: |-
+                      Resources sets requests/limits on the component's main container. SET THIS —
+                      leaving it empty is what makes the pod BestEffort and first to be evicted.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  tls:
+                    description: |-
+                      TLS terminates gRPC-TLS at the frontend (pair with a TCP-passthrough NLB so
+                      h2/ALPN negotiates end-to-end). Clients then dial grpcs://<host>.
+                    properties:
+                      enabled:
+                        type: boolean
+                      secretName:
+                        default: frontend-tls
+                        description: SecretName is the TLS key pair Secret (cert-manager-issued
+                          or supplied).
+                        type: string
+                    type: object
+                  tolerations:
+                    description: |-
+                      Tolerations let the component land on a tainted pool. Pair with NodeSelector:
+                      the toleration grants access, the selector compels placement.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists and Equal. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                type: object
+              host:
+                description: |-
+                  Host is the public gRPC endpoint hostname for the frontend (e.g.
+                  "rbe.fastverk.com"). external-dns publishes it; clients dial grpcs://<host>.
+                type: string
+              probe:
+                description: |-
+                  RbeProbeSpec configures the periodic RBE smoke build the operator runs to prove
+                  the cluster can execute actions end-to-end (a canned REAPI action against the
+                  frontend, using a freshly minted rbe:build token).
+                properties:
+                  enabled:
+                    description: |-
+                      Enabled turns on the periodic probe CronJob (on-demand probes are always
+                      available via the RunSmokeBuild control-plane RPC).
+                    type: boolean
+                  image:
+                    description: |-
+                      Image is the probe image — a small client that runs a REAPI Execute against
+                      the frontend and reports {ok, latency, cacheHit}. Defaults to the operator
+                      env RBE_PROBE_IMAGE.
+                    type: string
+                  schedule:
+                    default: '*/15 * * * *'
+                    description: Schedule is the probe cadence (cron). Default every
+                      15m.
+                    type: string
+                type: object
+              scheduler:
+                description: RbeSchedulerSpec configures the scheduler (the action
+                  queue / worker router).
+                properties:
+                  defaultExecutionTimeout:
+                    default: 1800s
+                    description: DefaultExecutionTimeout is the per-action execution
+                      timeout (e.g. "1800s").
+                    type: string
+                  instance:
+                    default: ubuntu22-04
+                    description: Instance is the REAPI instance name actions target
+                      (e.g. "ubuntu22-04").
+                    type: string
+                  maximumExecutionTimeout:
+                    default: 7200s
+                    description: MaximumExecutionTimeout caps per-action runtime (e.g.
+                      "7200s").
+                    type: string
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      NodeSelector pins the component to a labeled node pool, e.g.
+                      {"workload":"rbe-control"} for a small dedicated on-demand pool.
+                    type: object
+                  replicas:
+                    default: 1
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: |-
+                      Resources sets requests/limits on the component's main container. SET THIS —
+                      leaving it empty is what makes the pod BestEffort and first to be evicted.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  tolerations:
+                    description: |-
+                      Tolerations let the component land on a tainted pool. Pair with NodeSelector:
+                      the toleration grants access, the selector compels placement.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists and Equal. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                type: object
+              storage:
+                description: RbeStorageSpec configures the sharded CAS/AC blobstore
+                  (EBS-backed).
+                properties:
+                  acSize:
+                    default: 1Gi
+                    description: AcSize is the per-replica AC EBS PVC size (e.g. "1Gi").
+                    type: string
+                  casSize:
+                    default: 33Gi
+                    description: CasSize is the per-replica CAS EBS PVC size (e.g.
+                      "33Gi"); cas dominates.
+                    type: string
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      NodeSelector pins the component to a labeled node pool, e.g.
+                      {"workload":"rbe-control"} for a small dedicated on-demand pool.
+                    type: object
+                  replicas:
+                    default: 2
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: |-
+                      Resources sets requests/limits on the component's main container. SET THIS —
+                      leaving it empty is what makes the pod BestEffort and first to be evicted.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  tolerations:
+                    description: |-
+                      Tolerations let the component land on a tainted pool. Pair with NodeSelector:
+                      the toleration grants access, the selector compels placement.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists and Equal. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                type: object
+              worker:
+                description: RbeWorkerSpec configures the worker pool (where actions
+                  execute).
+                properties:
+                  autoscaling:
+                    description: |-
+                      Autoscaling, when enabled, has the operator manage a KEDA ScaledObject that
+                      scales the worker Deployment on the buildbarn scheduler's queue backlog, so RBE
+                      capacity tracks build demand (and scales down — even to zero — when idle). The
+                      static Replicas becomes just the helm floor (set to MinReplicas). Node capacity
+                      still caps the ceiling; a node autoscaler (Karpenter/CAS on the worker nodegroup)
+                      is the complementary half.
+                    properties:
+                      cooldownSeconds:
+                        default: 300
+                        description: CooldownSeconds is how long to wait after the
+                          backlog drains before scaling down.
+                        format: int32
+                        type: integer
+                      enabled:
+                        description: Enabled turns on the managed KEDA ScaledObject
+                          for the worker Deployment.
+                        type: boolean
+                      maxReplicas:
+                        default: 2
+                        description: |-
+                          MaxReplicas is the worker ceiling. Cannot exceed what the worker nodegroup can
+                          hold without node autoscaling.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        default: 1
+                        description: |-
+                          MinReplicas is the worker floor. 0 = scale-to-zero when the queue is empty
+                          (cheapest, but the first build after idle waits for a cold worker start).
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      prometheusAddress:
+                        default: http://prometheus-server.monitoring.svc.cluster.local:80
+                        description: PrometheusAddress is the Prometheus the KEDA
+                          trigger queries.
+                        type: string
+                      targetBacklogPerReplica:
+                        description: |-
+                          TargetBacklogPerReplica is the queued+executing tasks each worker should carry;
+                          replicas ≈ ceil(backlog / this). Empty ⇒ the worker Concurrency.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                  concurrency:
+                    default: 4
+                    description: |-
+                      Concurrency is action slots per worker pod (total live slots = replicas ×
+                      concurrency). Size against the node's cores+RAM.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  containerImage:
+                    description: |-
+                      ContainerImage is advertised to the scheduler for action routing + the RBE
+                      action-cache key. MUST equal docker://<runnerImage> AND the consumer's
+                      //platforms:rbe container-image exec-property, or actions never match.
+                      No default: the worker image is deployment-specific, and a default naming
+                      one account's registry would be a hosted-platform symbol in a package that
+                      is deliberately host-agnostic. Set it explicitly on the RbeCluster.
+                    type: string
+                  cpuRequest:
+                    default: "2"
+                    description: CPURequest is the per-worker-pod CPU request (buildbarn
+                      chart worker.resources.requests.cpu).
+                    type: string
+                  memoryLimit:
+                    description: |-
+                      MemoryLimit caps per-worker-pod memory. Empty = no limit (the chart default).
+                      Set it (e.g. "14Gi" on a 16Gi node at Concurrency=1) to make heavy links
+                      deterministic rather than oversubscribing the node.
+                    type: string
+                  memoryRequest:
+                    default: 4Gi
+                    description: |-
+                      MemoryRequest is the per-worker-pod memory request. Heavy Rust links
+                      (aws-lc-sys/ring) peak >7Gi; combined with Concurrency=1 this reserves
+                      enough headroom to keep a single action from OOM-killing the node.
+                    type: string
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      NodeSelector steers worker pods onto a labeled node pool (e.g. a
+                      memory-optimized r6i group: {"workload":"rbe-worker"}). Empty = default scheduling.
+                    type: object
+                  replicas:
+                    default: 3
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  runnerImage:
+                    default: ghcr.io/catthehacker/ubuntu:act-22.04
+                    description: |-
+                      RunnerImage is the action-environment ("runner") rootfs actions execute in.
+                      MUST carry the toolchains actions need.
+                    type: string
+                type: object
+            type: object
+          status:
+            description: RbeClusterStatus is the observed state of an RbeCluster.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              endpoint:
+                description: |-
+                  Endpoint is the resolved client endpoint (grpcs://<host> or the in-cluster
+                  frontend Service when no host is set).
+                type: string
+              lastProbe:
+                description: LastProbe is the result of the most recent smoke build.
+                properties:
+                  at:
+                    description: At is when the probe last ran.
+                    format: date-time
+                    type: string
+                  cacheHit:
+                    description: CacheHit is true when the action result was served
+                      from the AC.
+                    type: boolean
+                  latencyMs:
+                    description: LatencyMs is the wall-clock execution time of the
+                      probe action.
+                    format: int64
+                    type: integer
+                  message:
+                    description: Message carries the failure reason when OK is false.
+                    type: string
+                  ok:
+                    type: boolean
+                type: object
+              lastProbeTrigger:
+                description: |-
+                  LastProbeTrigger is the opaque token of the most recently handled on-demand
+                  probe (the `fastverk.savvifi.com/probe-now` annotation). When the annotation
+                  differs, the controller kicks a fresh smoke-build Job. This is how the
+                  control-plane RunSmokeBuild RPC drives an on-demand RBE test.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation the status
+                  reflects.
+                format: int64
+                type: integer
+              observedHash:
+                description: |-
+                  ObservedHash is the spec hash of the currently-applied buildbarn release; a
+                  change spawns a fresh Helm-runner Job (re-install).
+                type: string
+              phase:
+                description: RbeClusterPhase is the high-level lifecycle phase reflected
+                  in status.phase.
+                enum:
+                - Pending
+                - Installing
+                - Ready
+                - Degraded
+                - Failed
+                - Deleting
+                type: string
+              queueDepth:
+                description: QueueDepth is the scheduler's queued-action count.
+                format: int64
+                type: integer
+              workers:
+                description: Workers is the observed worker-pool utilization.
+                properties:
+                  executing:
+                    format: int64
+                    type: integer
+                  idle:
+                    format: int64
+                    type: integer
+                  total:
+                    format: int64
+                    type: integer
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
