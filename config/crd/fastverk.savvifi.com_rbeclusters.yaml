@@ -56,6 +56,143 @@ spec:
           spec:
             description: RbeClusterSpec is the desired state of an RbeCluster.
             properties:
+              browser:
+                description: |-
+                  RbeBrowserSpec configures bb-browser, the action-inspection UI.
+
+                  ⚠ IT IS A DEBUGGING TOOL, NOT PART OF THE BUILD PATH. No action depends on it and no
+                  client dials it, so it is the one component whose placement is a pure cost decision —
+                  which is exactly why it must be expressible here. At 3 replicas with no placement of
+                  its own it inherited the chart-global `workload: rbe-worker` selector and pinned three
+                  8-vCPU nodes against `consolidationPolicy: WhenEmpty`; two of them ran a browser pod
+                  and nothing else, so the worker pool could never consolidate back to its floor. That
+                  cost roughly $500/month to show a UI nobody had open.
+                properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Enabled turns the browser Deployment on. Default true — it is genuinely useful
+                      when an action fails opaquely, and the fix for the incident above was placement
+                      and replica count, not removal.
+                    type: boolean
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      NodeSelector pins the component to a labeled node pool, e.g.
+                      {"workload":"rbe-control"} for a small dedicated on-demand pool.
+                    type: object
+                  replicas:
+                    default: 1
+                    description: |-
+                      Replicas. Default 1, and there is no reason to raise it: it serves interactive
+                      human traffic with no availability requirement.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  resources:
+                    description: |-
+                      Resources sets requests/limits on the component's main container. SET THIS —
+                      leaving it empty is what makes the pod BestEffort and first to be evicted.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  tolerations:
+                    description: |-
+                      Tolerations let the component land on a tainted pool. Pair with NodeSelector:
+                      the toleration grants access, the selector compels placement.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists and Equal. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                type: object
               chartRepo:
                 description: |-
                   ChartRepo/ChartVersion pin the buildbarn Helm chart the delegated Helm-runner
@@ -508,6 +645,19 @@ spec:
                           type: string
                       type: object
                     type: array
+                  volumeAttributesClassName:
+                    description: |-
+                      VolumeAttributesClassName names a VolumeAttributesClass applied to the CAS
+                      volume (k8s 1.31+, EBS CSI 1.35+), e.g. "cas-fast" for 16000 IOPS / 1000 MB/s.
+
+                      ⛔ THIS IS THE ONLY WAY TO CHANGE CAS THROUGHPUT WITHOUT A COLD CACHE. A
+                      StorageClass's parameters are immutable, so raising iops/throughput there means
+                      a new class, new volumes, and a CAS rebuild measured at ~1.6h on the fastverk
+                      cluster. Empty leaves gp3's 3000 IOPS / 125 MB/s baseline — which was the live
+                      bottleneck for an unknown period after storage moved onto m5n.2xlarge for its
+                      network and nobody re-measured. A throttled volume raises no error; it presents
+                      as "the RBE is slow", which sends you to the scheduler and the worker pool.
+                    type: string
                 type: object
               worker:
                 description: RbeWorkerSpec configures the worker pool (where actions
