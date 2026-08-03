@@ -226,6 +226,16 @@ type RbeStorageSpec struct {
 	// +optional
 	AcSize string `json:"acSize,omitempty"`
 
+	// StorageClassName is the StorageClass backing the CAS/AC/FSAC volumes. Empty leaves
+	// the chart default (`gp3`, which the chart also creates, backed by ebs.csi.aws.com).
+	//
+	// ⚠ REQUIRED ON ANY NON-AWS CLUSTER, alongside platform: generic. kind ships
+	// `standard` (rancher.io/local-path) and minikube ships `standard`
+	// (k8s.io/minikube-hostpath); neither can serve a claim bound to an EBS class, and the
+	// failure is a PVC that stays Pending with the reason only in an event nobody reads.
+	// +optional
+	StorageClassName string `json:"storageClassName,omitempty"`
+
 	// VolumeAttributesClassName names a VolumeAttributesClass applied to the CAS
 	// volume (k8s 1.31+, EBS CSI 1.35+), e.g. "cas-fast" for 16000 IOPS / 1000 MB/s.
 	//
@@ -313,6 +323,31 @@ type RbeClusterSpec struct {
 	Worker RbeWorkerSpec `json:"worker,omitempty"`
 	// +optional
 	Storage RbeStorageSpec `json:"storage,omitempty"`
+	// Platform selects the deployment profile. This is deliberately a PROFILE and not a
+	// pile of individual knobs.
+	//
+	// ⛔ WITHOUT IT THE OPERATOR CANNOT INSTALL ANYWHERE BUT AWS. The buildbarn chart
+	// defaults to `nodeSelector: {workload: rbe-worker}` and creates its own gp3
+	// StorageClass with the ebs.csi.aws.com provisioner. On any other cluster every pod
+	// sits Pending and every PVC sits unbound — measured on kind 2026-08-03, all five
+	// components Pending, with no error naming the cause.
+	//
+	// ⚠ AND IT CANNOT BE EXPRESSED PER-COMPONENT. The chart's placement helper is
+	// `$component.nodeSelector | default $global.nodeSelector`, and Helm's `default`
+	// treats an EMPTY MAP as absent — so setting a component's nodeSelector to {} falls
+	// straight back to the AWS default. Only an explicit null at the chart-global level
+	// clears it, which is why this is a top-level profile rather than a field on each
+	// component.
+	//
+	// "aws" (default) keeps the existing behaviour exactly. "generic" clears the
+	// chart-global placement and does not create a StorageClass, for kind, minikube, or
+	// any cluster that is not the fastverk-shaped one — which is what
+	// build-runner-seam.md's "runs in ANY cluster" promise requires.
+	// +kubebuilder:validation:Enum=aws;generic
+	// +kubebuilder:default=aws
+	// +optional
+	Platform string `json:"platform,omitempty"`
+
 	// +optional
 	Browser RbeBrowserSpec `json:"browser,omitempty"`
 	// +optional
