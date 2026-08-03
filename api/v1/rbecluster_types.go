@@ -226,7 +226,49 @@ type RbeStorageSpec struct {
 	// +optional
 	AcSize string `json:"acSize,omitempty"`
 
+	// VolumeAttributesClassName names a VolumeAttributesClass applied to the CAS
+	// volume (k8s 1.31+, EBS CSI 1.35+), e.g. "cas-fast" for 16000 IOPS / 1000 MB/s.
+	//
+	// ⛔ THIS IS THE ONLY WAY TO CHANGE CAS THROUGHPUT WITHOUT A COLD CACHE. A
+	// StorageClass's parameters are immutable, so raising iops/throughput there means
+	// a new class, new volumes, and a CAS rebuild measured at ~1.6h on the fastverk
+	// cluster. Empty leaves gp3's 3000 IOPS / 125 MB/s baseline — which was the live
+	// bottleneck for an unknown period after storage moved onto m5n.2xlarge for its
+	// network and nobody re-measured. A throttled volume raises no error; it presents
+	// as "the RBE is slow", which sends you to the scheduler and the worker pool.
+	// +optional
+	VolumeAttributesClassName string `json:"volumeAttributesClassName,omitempty"`
+
 	// Placement + resources for this control-plane singleton.
+	RbeControlPlanePlacement `json:",inline"`
+}
+
+// RbeBrowserSpec configures bb-browser, the action-inspection UI.
+//
+// ⚠ IT IS A DEBUGGING TOOL, NOT PART OF THE BUILD PATH. No action depends on it and no
+// client dials it, so it is the one component whose placement is a pure cost decision —
+// which is exactly why it must be expressible here. At 3 replicas with no placement of
+// its own it inherited the chart-global `workload: rbe-worker` selector and pinned three
+// 8-vCPU nodes against `consolidationPolicy: WhenEmpty`; two of them ran a browser pod
+// and nothing else, so the worker pool could never consolidate back to its floor. That
+// cost roughly $500/month to show a UI nobody had open.
+type RbeBrowserSpec struct {
+	// Enabled turns the browser Deployment on. Default true — it is genuinely useful
+	// when an action fails opaquely, and the fix for the incident above was placement
+	// and replica count, not removal.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Replicas. Default 1, and there is no reason to raise it: it serves interactive
+	// human traffic with no availability requirement.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Placement + resources. SET NodeSelector to the control pool — the whole point of
+	// this type is to keep the browser off worker nodes.
 	RbeControlPlanePlacement `json:",inline"`
 }
 
@@ -271,6 +313,8 @@ type RbeClusterSpec struct {
 	Worker RbeWorkerSpec `json:"worker,omitempty"`
 	// +optional
 	Storage RbeStorageSpec `json:"storage,omitempty"`
+	// +optional
+	Browser RbeBrowserSpec `json:"browser,omitempty"`
 	// +optional
 	Probe RbeProbeSpec `json:"probe,omitempty"`
 }
