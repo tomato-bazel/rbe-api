@@ -747,6 +747,79 @@ spec:
                         format: int32
                         minimum: 1
                         type: integer
+                      wake:
+                        description: |-
+                          Wake is the second trigger, and it is what makes MinReplicas: 0 usable.
+
+                          The backlog trigger CANNOT wake a pool from zero. With no workers the scheduler
+                          REJECTS a task rather than enqueueing it, so tasks_scheduled_total never
+                          increments, the Prometheus query stays empty, and KEDA never scales up. A closed
+                          loop, measured 2026-07-26: bazel got FAILED_PRECONDITION "No workers exist", the
+                          query returned 0, and the ScaledObject sat Active=False at 0/0.
+
+                          Wake watches a signal that exists BEFORE any of our own infrastructure knows a
+                          build is coming, and polls a different system, so the two triggers have
+                          independent failure domains. KEDA takes the max desired replicas across both.
+                        properties:
+                          github:
+                            description: GitHub scales on QUEUED GitHub Actions jobs.
+                            properties:
+                              authenticationRef:
+                                description: |-
+                                  AuthenticationRef names a KEDA TriggerAuthentication holding GitHub App
+                                  credentials.
+
+                                  ⚠ It is resolved in the ScaledObject's OWN namespace, not KEDA's. The
+                                  TriggerAuthentication and the Secret it points at must both live beside the
+                                  RbeCluster.
+                                minLength: 1
+                                type: string
+                              enabled:
+                                description: |-
+                                  Enabled turns the trigger on. Off by default: it needs credentials, and a
+                                  half-configured trigger reports failure only on the ScaledObject's Ready
+                                  condition, which is exactly where a broken ScaledObject already hides.
+                                type: boolean
+                              labels:
+                                description: Labels optionally counts only jobs whose
+                                  runs-on carries these labels.
+                                items:
+                                  type: string
+                                type: array
+                              owner:
+                                description: Owner is the GitHub org (or user) whose
+                                  queued jobs are counted.
+                                minLength: 1
+                                type: string
+                              repos:
+                                description: Repos optionally restricts counting to
+                                  specific repositories. Empty = whole scope.
+                                items:
+                                  type: string
+                                type: array
+                              runnerScope:
+                                default: org
+                                description: RunnerScope is org, repo or ent. `org`
+                                  matches org-scoped runner sets.
+                                enum:
+                                - org
+                                - repo
+                                - ent
+                                type: string
+                              targetWorkflowQueueLength:
+                                default: 1
+                                description: |-
+                                  TargetWorkflowQueueLength is queued jobs per worker replica. 1 is the honest
+                                  default: one queued CI job is at least one build's worth of parallel actions, and
+                                  the backlog trigger takes over sizing the moment real actions arrive.
+                                format: int32
+                                minimum: 1
+                                type: integer
+                            required:
+                            - authenticationRef
+                            - owner
+                            type: object
+                        type: object
                     type: object
                   concurrency:
                     default: 4

@@ -209,6 +209,63 @@ type WorkerAutoscaling struct {
 	// +kubebuilder:default=300
 	// +optional
 	CooldownSeconds int32 `json:"cooldownSeconds,omitempty"`
+	// Wake is the second trigger, and it is what makes MinReplicas: 0 usable.
+	//
+	// The backlog trigger CANNOT wake a pool from zero. With no workers the scheduler
+	// REJECTS a task rather than enqueueing it, so tasks_scheduled_total never
+	// increments, the Prometheus query stays empty, and KEDA never scales up. A closed
+	// loop, measured 2026-07-26: bazel got FAILED_PRECONDITION "No workers exist", the
+	// query returned 0, and the ScaledObject sat Active=False at 0/0.
+	//
+	// Wake watches a signal that exists BEFORE any of our own infrastructure knows a
+	// build is coming, and polls a different system, so the two triggers have
+	// independent failure domains. KEDA takes the max desired replicas across both.
+	// +optional
+	Wake *WorkerWake `json:"wake,omitempty"`
+}
+
+// WorkerWake configures the scale-from-zero trigger.
+type WorkerWake struct {
+	// GitHub scales on QUEUED GitHub Actions jobs.
+	// +optional
+	GitHub *WorkerWakeGitHub `json:"github,omitempty"`
+}
+
+// WorkerWakeGitHub is a KEDA github-runner trigger.
+type WorkerWakeGitHub struct {
+	// Enabled turns the trigger on. Off by default: it needs credentials, and a
+	// half-configured trigger reports failure only on the ScaledObject's Ready
+	// condition, which is exactly where a broken ScaledObject already hides.
+	Enabled bool `json:"enabled,omitempty"`
+	// Owner is the GitHub org (or user) whose queued jobs are counted.
+	// +kubebuilder:validation:MinLength=1
+	Owner string `json:"owner"`
+	// RunnerScope is org, repo or ent. `org` matches org-scoped runner sets.
+	// +kubebuilder:validation:Enum=org;repo;ent
+	// +kubebuilder:default=org
+	// +optional
+	RunnerScope string `json:"runnerScope,omitempty"`
+	// Repos optionally restricts counting to specific repositories. Empty = whole scope.
+	// +optional
+	Repos []string `json:"repos,omitempty"`
+	// Labels optionally counts only jobs whose runs-on carries these labels.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+	// TargetWorkflowQueueLength is queued jobs per worker replica. 1 is the honest
+	// default: one queued CI job is at least one build's worth of parallel actions, and
+	// the backlog trigger takes over sizing the moment real actions arrive.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	TargetWorkflowQueueLength int32 `json:"targetWorkflowQueueLength,omitempty"`
+	// AuthenticationRef names a KEDA TriggerAuthentication holding GitHub App
+	// credentials.
+	//
+	// ⚠ It is resolved in the ScaledObject's OWN namespace, not KEDA's. The
+	// TriggerAuthentication and the Secret it points at must both live beside the
+	// RbeCluster.
+	// +kubebuilder:validation:MinLength=1
+	AuthenticationRef string `json:"authenticationRef"`
 }
 
 // RbeStorageSpec configures the sharded CAS/AC blobstore (EBS-backed).
