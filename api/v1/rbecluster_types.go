@@ -258,8 +258,32 @@ type WorkerWakeGitHub struct {
 	// +kubebuilder:default=1
 	// +optional
 	TargetWorkflowQueueLength int32 `json:"targetWorkflowQueueLength,omitempty"`
-	// AuthenticationRef names a KEDA TriggerAuthentication holding GitHub App
-	// credentials.
+	// ApplicationID is the GitHub App's numeric App ID.
+	//
+	// ⛔ THIS IS NOT A SECRET AND IT DOES NOT GO IN THE TriggerAuthentication. KEDA's
+	// github-runner scaler reads applicationID and installationID from the trigger
+	// METADATA and only appKey from authParams. Supplying them via a
+	// TriggerAuthentication instead fails as
+	//
+	//     error resolving auth params:
+	//     error parsing GitHub Runner metadata: error parsing applicationID:
+	//     no applicationID given
+	//
+	// ⚠ whose "resolving auth params" wording sends you to the TriggerAuthentication --
+	// the one place the value must NOT be. Measured against KEDA 2.16.1; a
+	// TriggerAuthentication naming every parameter correctly still produced this.
+	//
+	// Neither id is a credential: App IDs are public via /apps/{slug} and an
+	// installation id is a handle, not an authorization. The private key is the secret,
+	// and it stays in AuthenticationRef.
+	// +kubebuilder:validation:Minimum=1
+	ApplicationID int64 `json:"applicationID"`
+	// InstallationID is this app's installation on Owner. See ApplicationID: metadata,
+	// not authParams.
+	// +kubebuilder:validation:Minimum=1
+	InstallationID int64 `json:"installationID"`
+	// AuthenticationRef names a KEDA TriggerAuthentication holding the GitHub App
+	// PRIVATE KEY, under the parameter `appKey` -- and nothing else. See ApplicationID.
 	//
 	// ⚠ It is resolved in the ScaledObject's OWN namespace, not KEDA's. The
 	// TriggerAuthentication and the Secret it points at must both live beside the
