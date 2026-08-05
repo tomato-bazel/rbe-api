@@ -248,6 +248,48 @@ type WorkerWake struct {
 	// +listType=map
 	// +listMapKey=owner
 	GitHub []WorkerWakeGitHub `json:"github,omitempty"`
+
+	// ArcListener scales on ARC's OWN queue depth instead of polling GitHub.
+	//
+	// ⭐ PREFER THIS OVER GitHub ABOVE. The ARC listener holds a long-poll session with the
+	// Actions service, so the queue depth is PUSHED to it; it publishes that as
+	// `gha_assigned_jobs`. Reading it costs ZERO GitHub API calls.
+	//
+	// ⛔ WHAT IT REPLACES, AND WHY THAT MATTERS. GitHub exposes no org-wide queue depth, so
+	// the github-runner scaler has to ENUMERATE: list the installation's repos, then GET
+	// /actions/runs on each, every pollingInterval. Measured on this estate:
+	//
+	//     72 repos x 120 polls/hr  =  ~8,640 API calls/hr   vs a 5,000/hr floor
+	//
+	// exhausted roughly every 35 minutes. And a scaler that errors takes the ScaledObject's
+	// WHOLE scalers cache with it, so rate-limiting one org disarms every other trigger on
+	// the pool -- including the backlog trigger that does the real sizing. The workaround
+	// was to scope the trigger to named repos, which just moves the failure: a repo left off
+	// the list queues against an idle fleet and hangs.
+	//
+	// ⭐ This has none of that. One trigger covers every org with a scale set, forever, with
+	// no credential and no per-repo list to keep in step.
+	// +optional
+	ArcListener *WorkerWakeArcListener `json:"arcListener,omitempty"`
+}
+
+// WorkerWakeArcListener scales the pool on ARC's published queue depth.
+//
+// Uses the autoscaling block's own PrometheusAddress -- the metric lands in the same
+// Prometheus as the backlog metric, so a second address would only be a way to get one of
+// them wrong.
+type WorkerWakeArcListener struct {
+	// Enabled turns the trigger on.
+	Enabled bool `json:"enabled,omitempty"`
+	// Threshold is assigned jobs per worker replica.
+	//
+	// 1 is the honest default: one job assigned to a runner scale set is at least one
+	// build's worth of parallel RBE actions, and the backlog trigger takes over sizing the
+	// moment real actions arrive. This trigger's job is only to get OFF ZERO.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	Threshold int32 `json:"threshold,omitempty"`
 }
 
 // WorkerWakeGitHub is a KEDA github-runner trigger.
