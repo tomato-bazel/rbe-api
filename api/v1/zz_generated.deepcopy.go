@@ -457,8 +457,10 @@ func (in *WorkerWake) DeepCopyInto(out *WorkerWake) {
 	*out = *in
 	if in.GitHub != nil {
 		in, out := &in.GitHub, &out.GitHub
-		*out = new(WorkerWakeGitHub)
-		(*in).DeepCopyInto(*out)
+		*out = make([]WorkerWakeGitHub, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 

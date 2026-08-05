@@ -226,9 +226,28 @@ type WorkerAutoscaling struct {
 
 // WorkerWake configures the scale-from-zero trigger.
 type WorkerWake struct {
-	// GitHub scales on QUEUED GitHub Actions jobs.
+	// GitHub scales on QUEUED GitHub Actions jobs — ONE ENTRY PER ORG.
+	//
+	// ⛔ A LIST, BECAUSE A SINGLE ENTRY SILENTLY STRANDS EVERY OTHER ORG. The scaler counts
+	// queued jobs for exactly one `owner`, so with one entry and minReplicas 0 a job from
+	// any other org queues against an idle fleet and HANGS: the scheduler rejects rather
+	// than enqueues, tasks_scheduled_total never increments, the backlog query stays empty,
+	// and nothing wakes. That is the documented deadlock the floor was raised to 1 to avoid,
+	// arriving through a different door — and it reports nothing, because a fleet with no
+	// work to do and a fleet that cannot see its work look identical.
+	//
+	// ⭐ One TriggerAuthentication serves them all. The orgs share a GitHub App, so they
+	// share a private key; only the ids differ, and those are trigger metadata rather than
+	// auth params (see WorkerWakeGitHub.ApplicationID). Adding an org is a CR edit, not a
+	// new Secret.
+	//
+	// ⚠ Owners must be unique. KEDA derives each trigger's metric name from the scaler type
+	// and the owner, so two entries with the same owner collide on one metric name and the
+	// HPA reads whichever KEDA registered last.
 	// +optional
-	GitHub *WorkerWakeGitHub `json:"github,omitempty"`
+	// +listType=map
+	// +listMapKey=owner
+	GitHub []WorkerWakeGitHub `json:"github,omitempty"`
 }
 
 // WorkerWakeGitHub is a KEDA github-runner trigger.
