@@ -762,95 +762,120 @@ spec:
                           independent failure domains. KEDA takes the max desired replicas across both.
                         properties:
                           github:
-                            description: GitHub scales on QUEUED GitHub Actions jobs.
-                            properties:
-                              applicationID:
-                                description: |-
-                                  ApplicationID is the GitHub App's numeric App ID.
+                            description: |-
+                              GitHub scales on QUEUED GitHub Actions jobs — ONE ENTRY PER ORG.
 
-                                  ⛔ THIS IS NOT A SECRET AND IT DOES NOT GO IN THE TriggerAuthentication. KEDA's
-                                  github-runner scaler reads applicationID and installationID from the trigger
-                                  METADATA and only appKey from authParams. Supplying them via a
-                                  TriggerAuthentication instead fails as
+                              ⛔ A LIST, BECAUSE A SINGLE ENTRY SILENTLY STRANDS EVERY OTHER ORG. The scaler counts
+                              queued jobs for exactly one `owner`, so with one entry and minReplicas 0 a job from
+                              any other org queues against an idle fleet and HANGS: the scheduler rejects rather
+                              than enqueues, tasks_scheduled_total never increments, the backlog query stays empty,
+                              and nothing wakes. That is the documented deadlock the floor was raised to 1 to avoid,
+                              arriving through a different door — and it reports nothing, because a fleet with no
+                              work to do and a fleet that cannot see its work look identical.
 
-                                      error resolving auth params:
-                                      error parsing GitHub Runner metadata: error parsing applicationID:
-                                      no applicationID given
+                              ⭐ One TriggerAuthentication serves them all. The orgs share a GitHub App, so they
+                              share a private key; only the ids differ, and those are trigger metadata rather than
+                              auth params (see WorkerWakeGitHub.ApplicationID). Adding an org is a CR edit, not a
+                              new Secret.
 
-                                  ⚠ whose "resolving auth params" wording sends you to the TriggerAuthentication --
-                                  the one place the value must NOT be. Measured against KEDA 2.16.1; a
-                                  TriggerAuthentication naming every parameter correctly still produced this.
+                              ⚠ Owners must be unique. KEDA derives each trigger's metric name from the scaler type
+                              and the owner, so two entries with the same owner collide on one metric name and the
+                              HPA reads whichever KEDA registered last.
+                            items:
+                              description: WorkerWakeGitHub is a KEDA github-runner
+                                trigger.
+                              properties:
+                                applicationID:
+                                  description: |-
+                                    ApplicationID is the GitHub App's numeric App ID.
 
-                                  Neither id is a credential: App IDs are public via /apps/{slug} and an
-                                  installation id is a handle, not an authorization. The private key is the secret,
-                                  and it stays in AuthenticationRef.
-                                format: int64
-                                minimum: 1
-                                type: integer
-                              authenticationRef:
-                                description: |-
-                                  AuthenticationRef names a KEDA TriggerAuthentication holding the GitHub App
-                                  PRIVATE KEY, under the parameter `appKey` -- and nothing else. See ApplicationID.
+                                    ⛔ THIS IS NOT A SECRET AND IT DOES NOT GO IN THE TriggerAuthentication. KEDA's
+                                    github-runner scaler reads applicationID and installationID from the trigger
+                                    METADATA and only appKey from authParams. Supplying them via a
+                                    TriggerAuthentication instead fails as
 
-                                  ⚠ It is resolved in the ScaledObject's OWN namespace, not KEDA's. The
-                                  TriggerAuthentication and the Secret it points at must both live beside the
-                                  RbeCluster.
-                                minLength: 1
-                                type: string
-                              enabled:
-                                description: |-
-                                  Enabled turns the trigger on. Off by default: it needs credentials, and a
-                                  half-configured trigger reports failure only on the ScaledObject's Ready
-                                  condition, which is exactly where a broken ScaledObject already hides.
-                                type: boolean
-                              installationID:
-                                description: |-
-                                  InstallationID is this app's installation on Owner. See ApplicationID: metadata,
-                                  not authParams.
-                                format: int64
-                                minimum: 1
-                                type: integer
-                              labels:
-                                description: Labels optionally counts only jobs whose
-                                  runs-on carries these labels.
-                                items:
+                                        error resolving auth params:
+                                        error parsing GitHub Runner metadata: error parsing applicationID:
+                                        no applicationID given
+
+                                    ⚠ whose "resolving auth params" wording sends you to the TriggerAuthentication --
+                                    the one place the value must NOT be. Measured against KEDA 2.16.1; a
+                                    TriggerAuthentication naming every parameter correctly still produced this.
+
+                                    Neither id is a credential: App IDs are public via /apps/{slug} and an
+                                    installation id is a handle, not an authorization. The private key is the secret,
+                                    and it stays in AuthenticationRef.
+                                  format: int64
+                                  minimum: 1
+                                  type: integer
+                                authenticationRef:
+                                  description: |-
+                                    AuthenticationRef names a KEDA TriggerAuthentication holding the GitHub App
+                                    PRIVATE KEY, under the parameter `appKey` -- and nothing else. See ApplicationID.
+
+                                    ⚠ It is resolved in the ScaledObject's OWN namespace, not KEDA's. The
+                                    TriggerAuthentication and the Secret it points at must both live beside the
+                                    RbeCluster.
+                                  minLength: 1
                                   type: string
-                                type: array
-                              owner:
-                                description: Owner is the GitHub org (or user) whose
-                                  queued jobs are counted.
-                                minLength: 1
-                                type: string
-                              repos:
-                                description: Repos optionally restricts counting to
-                                  specific repositories. Empty = whole scope.
-                                items:
+                                enabled:
+                                  description: |-
+                                    Enabled turns the trigger on. Off by default: it needs credentials, and a
+                                    half-configured trigger reports failure only on the ScaledObject's Ready
+                                    condition, which is exactly where a broken ScaledObject already hides.
+                                  type: boolean
+                                installationID:
+                                  description: |-
+                                    InstallationID is this app's installation on Owner. See ApplicationID: metadata,
+                                    not authParams.
+                                  format: int64
+                                  minimum: 1
+                                  type: integer
+                                labels:
+                                  description: Labels optionally counts only jobs
+                                    whose runs-on carries these labels.
+                                  items:
+                                    type: string
+                                  type: array
+                                owner:
+                                  description: Owner is the GitHub org (or user) whose
+                                    queued jobs are counted.
+                                  minLength: 1
                                   type: string
-                                type: array
-                              runnerScope:
-                                default: org
-                                description: RunnerScope is org, repo or ent. `org`
-                                  matches org-scoped runner sets.
-                                enum:
-                                - org
-                                - repo
-                                - ent
-                                type: string
-                              targetWorkflowQueueLength:
-                                default: 1
-                                description: |-
-                                  TargetWorkflowQueueLength is queued jobs per worker replica. 1 is the honest
-                                  default: one queued CI job is at least one build's worth of parallel actions, and
-                                  the backlog trigger takes over sizing the moment real actions arrive.
-                                format: int32
-                                minimum: 1
-                                type: integer
-                            required:
-                            - applicationID
-                            - authenticationRef
-                            - installationID
+                                repos:
+                                  description: Repos optionally restricts counting
+                                    to specific repositories. Empty = whole scope.
+                                  items:
+                                    type: string
+                                  type: array
+                                runnerScope:
+                                  default: org
+                                  description: RunnerScope is org, repo or ent. `org`
+                                    matches org-scoped runner sets.
+                                  enum:
+                                  - org
+                                  - repo
+                                  - ent
+                                  type: string
+                                targetWorkflowQueueLength:
+                                  default: 1
+                                  description: |-
+                                    TargetWorkflowQueueLength is queued jobs per worker replica. 1 is the honest
+                                    default: one queued CI job is at least one build's worth of parallel actions, and
+                                    the backlog trigger takes over sizing the moment real actions arrive.
+                                  format: int32
+                                  minimum: 1
+                                  type: integer
+                              required:
+                              - applicationID
+                              - authenticationRef
+                              - installationID
+                              - owner
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
                             - owner
-                            type: object
+                            x-kubernetes-list-type: map
                         type: object
                     type: object
                   concurrency:
