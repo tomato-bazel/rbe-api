@@ -167,6 +167,23 @@ type RbeWorkerSpec struct {
 	// memory-optimized r6i group: {"workload":"rbe-worker"}). Empty = default scheduling.
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Drain configures the preStop hook that tells the scheduler this worker is
+	// leaving BEFORE it stops answering, so the handover stops landing new actions
+	// on a pod that is about to die.
+	//
+	// ⛔ WITHOUT IT, A SCALE-DOWN SILENTLY EATS BUILDS. buildbarn#19 measured it on a
+	// 3-worker fleet with live alternatives available throughout: 12 actions submitted
+	// while one worker was terminating, FIVE landed on the dying worker — 42% — each
+	// claimed by a pod with seconds to live and then SIGKILLed. Downstream that surfaces
+	// as `UNAVAILABLE: Worker {…} disappeared while task was executing`, which reads as a
+	// network fault rather than a scheduling one.
+	//
+	// ⚠ THIS IS NOT terminationGracePeriodSeconds, AND RAISING THAT IS THE WRONG FIX —
+	// buildbarn's chart says so directly. The grace period lets a worker FINISH what it
+	// holds, is paid on EVERY termination, and buys nothing past ~120s on spot (the
+	// instance goes regardless). This stops it being GIVEN MORE, which costs nothing.
+	// +optional
+	Drain RbeWorkerDrainSpec `json:"drain,omitempty"`
 	// Autoscaling, when enabled, has the operator manage a KEDA ScaledObject that
 	// scales the worker Deployment on the buildbarn scheduler's queue backlog, so RBE
 	// capacity tracks build demand (and scales down — even to zero — when idle). The
@@ -354,6 +371,48 @@ type WorkerWakeGitHub struct {
 }
 
 // RbeStorageSpec configures the sharded CAS/AC blobstore (EBS-backed).
+// RbeWorkerDrainSpec is the worker preStop drain (buildbarn chart >= 0.4.6,
+// worker.drain.preStop).
+//
+// ⚠ IT DOES NOT MAKE WORKERS STICKY, AND MUST NOT. Workers deliberately carry no PDB
+// and no karpenter.sh/do-not-disrupt so they stay freely consolidatable, and a lost
+// worker's action is retried. This changes the HANDOVER, not the disruptability.
+type RbeWorkerDrainSpec struct {
+	// Enabled turns the preStop hook on.
+	//
+	// ⛔ ENABLING THIS WITHOUT Image IS A FLEET-WIDE OUTAGE, not a no-op: every worker
+	// pod fails to start on ImagePullBackOff. That is why the chart defaults it off and
+	// why Image has no default here — a default naming one account's registry would be
+	// a hosted-platform symbol in a host-agnostic package, the same reason
+	// ContainerImage has none.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+	// Image is the rbe-drain image, staged by an initContainer onto the shared volume
+	// and exec'd by the hook from inside bb-worker.
+	//
+	// ⚠ PIN BY DIGEST, AND MAKE SURE THAT DIGEST IS TAGGED. ECR lifecycle policies in
+	// this estate expire untagged images beyond one, so a digest-pinned UNTAGGED image
+	// is a single unrelated push from being expired out from under a live fleet — the
+	// failure that cost roma-cache 28 hours, and fastverk-operator and badge before it.
+	// +optional
+	Image string `json:"image,omitempty"`
+	// SchedulerAddress is the scheduler's BuildQueueState surface.
+	//
+	// ⛔ PORT 8984, NOT 8983 (workers) OR 8982 (clients). It was declared in
+	// scheduler.jsonnet from the start and published on no Service until chart 0.4.6, so
+	// every call to it failed at connect. Empty = the chart's in-namespace default.
+	// +optional
+	SchedulerAddress string `json:"schedulerAddress,omitempty"`
+	// Timeout bounds the hook.
+	//
+	// ⚠ SPENT FROM terminationGracePeriodSeconds, so this is a BUDGET, not a limit to be
+	// generous with: every second here is a second the in-flight action does not get. Its
+	// real job is to bound the case where the scheduler is unreachable — where draining is
+	// pointless anyway. Empty = the chart default (5s).
+	// +optional
+	Timeout string `json:"timeout,omitempty"`
+}
+
 type RbeStorageSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=2
