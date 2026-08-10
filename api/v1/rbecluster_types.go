@@ -184,6 +184,21 @@ type RbeWorkerSpec struct {
 	// instance goes regardless). This stops it being GIVEN MORE, which costs nothing.
 	// +optional
 	Drain RbeWorkerDrainSpec `json:"drain,omitempty"`
+	// BuildDirectory selects how a worker materializes an action's input root.
+	//
+	// ⭐ THIS IS THE LARGEST SINGLE LEVER ON BUILD WALL TIME, and it attacks demand
+	// rather than supply. Measured on savvifi/aion run 31396048925 (a GREEN build):
+	// input fetch 83.0% of remote action time against execute 2.1% -- a fetch:exec
+	// ratio of 40 : 1. `native` materializes the ENTIRE input root on local disk before
+	// the action runs, every file, whether it is read or not; `virtual` fetches blobs
+	// lazily on read, so a tree nobody reads is never moved.
+	//
+	// ⚠ THE WIN IS CONCENTRATED IN A TAIL, SO MEASURE IT THERE. Per-action fetch time
+	// is p50 1.9s but p99 634s (max 1018s), and half of all fetch time sits in the
+	// slowest 5.4% of actions -- closures of 5-6 GB. Judging `virtual` on the MEAN will
+	// understate it badly. One recorded case: 2,912s of transfer for 0.4s of work.
+	// +optional
+	BuildDirectory RbeWorkerBuildDirectorySpec `json:"buildDirectory,omitempty"`
 	// Autoscaling, when enabled, has the operator manage a KEDA ScaledObject that
 	// scales the worker Deployment on the buildbarn scheduler's queue backlog, so RBE
 	// capacity tracks build demand (and scales down — even to zero — when idle). The
@@ -411,6 +426,31 @@ type RbeWorkerDrainSpec struct {
 	// pointless anyway. Empty = the chart default (5s).
 	// +optional
 	Timeout string `json:"timeout,omitempty"`
+}
+
+type RbeWorkerBuildDirectorySpec struct {
+	// Type is `native` (materialize the whole input root up front) or `virtual`
+	// (FUSE/NFS input root, blobs fetched lazily on read). Empty = the chart default,
+	// which is `native` -- the historical behavior, so an unset field changes nothing.
+	//
+	// ⛔ `virtual` IS THE HIGHEST-RISK KNOB IN THIS SPEC. It changes how every action
+	// sees its filesystem: actions that mmap, that walk the whole tree, or that assume
+	// local-disk semantics can behave differently. Land it ALONE, never in the same
+	// pass as a CAS sharding change, or a broken build cannot be attributed.
+	//
+	// ⚠ IT ALSO REQUIRES PRIVILEGE THE CHART OTHERWISE NEVER GRANTS: bb-worker needs
+	// /dev/fuse and SYS_ADMIN, emitted ONLY when this is `virtual` so a default install
+	// gains nothing. The `runner` sidecar runs allowPrivilegeEscalation:false as uid
+	// 65534 and shares /worker, so it must still SEE the mount -- mountPropagation on
+	// that shared volume is the coupling point and the likeliest thing to get wrong.
+	//
+	// ⚠ Its benefit is read through the FileSystemAccessCache, which learns each
+	// action's read set. Resharding storage EMPTIES the FSAC, so measuring `virtual`
+	// straight after a shard change understates it and blames the wrong knob. Put a
+	// warm-up build between them.
+	// +kubebuilder:validation:Enum=native;virtual
+	// +optional
+	Type string `json:"type,omitempty"`
 }
 
 type RbeStorageSpec struct {
